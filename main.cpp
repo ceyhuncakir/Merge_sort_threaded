@@ -3,6 +3,8 @@
 #include <vector>
 #include <chrono>
 #include <thread>
+#include <numeric>
+#include <cmath>
 
 using namespace std::chrono;
 
@@ -76,35 +78,49 @@ std::vector<T> merge_sort(std::vector<T> array_01, std::vector<T> array_02) {
   }
 }
 
-void threading(function<void> func, std::thread t) {
-
-  if(t.isjoinable()) {
-    t.join()l
-  } else {
-    t(func);
-  }
-}
-
 template <typename T>
-std::vector<T> recursive_merge_sort(std::vector<T> data, int max_threads) {
+std::vector<T> recursive_merge_sort(std::vector<T> data) {
   if(data.size() == 1) {
     return data;
   } else {
-    // splitsingen bijhouden zodat je weet wanneer je de threads moet aanroepen.
+
     std::size_t const middle = data.size() / 2;
     std::vector<T> first(data.begin(), data.begin() + middle);
     std::vector<T> second(data.begin() + middle, data.end());
 
+    std::vector<T> first_output = {};
+    std::vector<T> second_output = {};
 
-    // std::vector<T> first_output = {};
-    // std::vector<T> second_output = {};
-    //
-    //
-    // first_output = recursive_merge_sort(first);
-    // second_output = recursive_merge_sort(second);
+
+    first_output = recursive_merge_sort(first);
+    second_output = recursive_merge_sort(second);
 
     return merge_sort(first_output, second_output);
   }
+}
+
+std::vector<std::vector<int>> get_splits(std::vector<int> data, int threads) {
+
+  std::vector<std::vector<int>> split_data = {};
+
+  for(int i = 0; i < threads; i++) {
+    split_data.push_back({data.begin() + i, data.end() + threads});
+  }
+
+  return split_data;
+}
+
+template <typename T>
+std::vector<T> threaded_merge_sort(std::vector<T> data, int max_threads) {
+  std::vector<std::vector<int>> splits = get_splits(data, max_threads);
+  std::vector<T> value = {};
+
+  for(int i = 0; i < max_threads; i++) {
+    std::cout << splits[i];
+    std::thread thread_1(recursive_merge_sort, splits[i]);
+  }
+
+  return value;
 }
 
 int main() {
@@ -112,7 +128,7 @@ int main() {
   std::vector<int> sorted_array;
 
   auto start = high_resolution_clock::now();
-  sorted_array = recursive_merge_sort(data, 4);
+  sorted_array = threaded_merge_sort(data, 4);
   auto stop = high_resolution_clock::now();
 
   auto duration = duration_cast<microseconds>(stop - start);
