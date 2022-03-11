@@ -5,8 +5,13 @@
 #include <numeric>
 #include <cmath>
 #include <thread>
+#include <future>
+#include <algorithm>
+#include "json.hpp"
+#include <fstream>
 
 using namespace std::chrono;
+using jsonf = nlohmann::json;
 
 std::vector<int> merge_sort(std::vector<int> array_01, std::vector<int> array_02) {
 
@@ -78,6 +83,7 @@ std::vector<int> merge_sort(std::vector<int> array_01, std::vector<int> array_02
 }
 
 std::vector<int> recursive_merge_sort(std::vector<int> data) {
+
   if(data.size() == 1) {
     return data;
   } else {
@@ -90,55 +96,135 @@ std::vector<int> recursive_merge_sort(std::vector<int> data) {
   }
 }
 
+// de functie die splits maakt aan de hand van de hoeveelheid threads die je gebruikt
 std::vector<std::vector<int>> get_splits(std::vector<int> data, int threads) {
 
-  std::vector<std::vector<int>> split_data = {};
+  // we vinden de midden punt van het lijst
+  std::size_t const middle = data.size() / 2;
+  // de linker deel van de split
+  std::vector<int> first(data.begin(), data.begin() + middle);
+  // de rechter deel van de split
+  std::vector<int> second(data.begin() + middle, data.end());
 
-  for(int i = 0; i < threads; i++) {
-    split_data.push_back({data.begin() + i, data.end() + threads});
+  std::vector<std::vector<int>> split_data = {first, second};
+
+  while(split_data.size() < threads) {
+    std::vector<std::vector<int>> temp = {};
+    for(int i = 0; i < split_data.size(); i++) {
+      std::size_t const middle = split_data[i].size() / 2;
+      std::vector<int> first(split_data[i].begin(), split_data[i].begin() + middle);
+      std::vector<int> second(split_data[i].begin() + middle, split_data[i].end());
+
+      temp.push_back(first);
+      temp.push_back(second);
+    }
+    split_data = temp;
   }
 
   return split_data;
 }
 
-std::vector<int> threaded_merge_sort(std::vector<int> data, int max_threads) {
-  std::vector<int> output = {};
 
+// functie de de threading van de merge sort doet
+std::vector<int> threaded_merge_sort(std::vector<int> data, int max_threads) {
+  // de futures die opgeslagen worden
+  std::vector<std::future<std::vector<int>>> futures = {};
+  // de output van de threading
+  std::vector<std::vector<int>> threading_output = {};
+
+  // er word gekeken of de max_threads wat binnen komt groter is dan 1
   if(max_threads > 1) {
     std::vector<std::vector<int>> splits = get_splits(data, max_threads);
-    std::vector<std::thread> threads;
 
+    // voor de hoeveelheid splits die er zijn worden er threads aangemaakt
     for(int i = 0; i < splits.size(); i++) {
-      threads.emplace_back(std::thread(recursive_merge_sort, std::ref(splits[i])));
+      futures.push_back(std::async(recursive_merge_sort, std::ref(splits[i])));
     }
-    for(auto& t1 : threads) {
-      t1.join();
+
+    // we loopen over de threads om elke uitkomst te krijgen. die uitkomsten worden weer naar de threading_output gestuurd.
+    for(int i = 0; i < futures.size(); i++) {
+      threading_output.push_back(futures[i].get());
     }
   } else {
+    // als de max_threads wat binnen komt niet groter is dan 1 dan voert die gewoon de recursieve merge sort uit (de default)
     return recursive_merge_sort(data);
   }
-  // we returnen de output van de threads
-  return output;
-}
 
-// testen of
+  int i = 0;
+  // we kijken of de threading output size groter is dan 1
+  while(threading_output.size() > 1) {
+    // voor elke threading output sorteren we ze op de juiste manier voor de left en de right
+    threading_output[i] = merge_sort(threading_output[i], threading_output[i + 1]);
+    // we verwijderen die output zodat het steeds meer terug komt naar een gesorteerde lijst
+    threading_output.erase(threading_output.begin() + (i + 1));
 
-int main() {
-  std::vector<int> data = {10000};
-  std::generate(data.begin(), data.end(), std::rand());
-  std::vector<int> sorted_array;
-
-  auto start = high_resolution_clock::now();
-  sorted_array = threaded_merge_sort(data, 4);
-  auto stop = high_resolution_clock::now();
-
-  auto duration = duration_cast<microseconds>(stop - start);
-
-  for(auto e : sorted_array) {
-    std::cout << e << " | ";
+    // uiteindelijk word de index verhoog als de index kleiner is dan de threading output size - 2
+    if(i < threading_output.size() - 2) {
+      i += 1;
+    } else {
+      i = 0;
+    }
   }
 
-  std::cout << "Time taken by merge sort algoritme: " << duration.count() << " microseconds" << std::endl;
+  // de sorteerde lijst word teruggestuurd
+  return threading_output[0];
+}
+
+
+int main() {
+  jsonf jsonfile;
+
+  std::vector<int> data(1000);
+  std::generate(data.begin(), data.end(), std::rand);
+
+  // de runs waar threads worden gebruikt of niet
+
+  auto start_01 = high_resolution_clock::now();
+  std::vector<int> sorted_array_without_threads = threaded_merge_sort(data, 0);
+  auto stop_01 = high_resolution_clock::now();
+
+  auto duration_without_threads = duration_cast<microseconds>(stop_01 - start_01);
+
+  auto start_02 = high_resolution_clock::now();
+  std::vector<int> sorted_array_with_2_threads = threaded_merge_sort(data, 2);
+  auto stop_02 = high_resolution_clock::now();
+
+  auto duration_with_2_threads = duration_cast<microseconds>(stop_02 - start_02);
+
+  auto start_03 = high_resolution_clock::now();
+  std::vector<int> sorted_array_with_4_threads = threaded_merge_sort(data, 4);
+  auto stop_03 = high_resolution_clock::now();
+
+  auto duration_with_4_threads = duration_cast<microseconds>(stop_03 - start_03);
+
+  auto start_04 = high_resolution_clock::now();
+  std::vector<int> sorted_array_with_8_threads = threaded_merge_sort(data, 8);
+  auto stop_04 = high_resolution_clock::now();
+
+  auto duration_with_8_threads = duration_cast<microseconds>(stop_04 - start_04);
+
+
+  // de json structuur waar de data in word gestoppt
+  jsonfile = {
+    {"merge_sort", {
+      {"thread_1", duration_without_threads.count()},
+      {"thread_2", duration_with_2_threads.count()},
+      {"thread_4", duration_with_4_threads.count()},
+      {"thread_8", duration_with_8_threads.count()},
+    }}
+  };
+
+  std::ofstream file("data/data.json");
+  // we schrijven de json structuur naar de file
+  file << jsonfile;
+
+  std::cout << std::endl;
+  std::cout << "array with the size of " << data.size() << " elements" << std::endl;
+  std::cout << std::endl;
+  std::cout << "merge_sort without threads: " << duration_without_threads.count() << " microseconds" << std::endl;
+  std::cout << "merge_sort with 2 threads: " << duration_with_2_threads.count() << " microseconds" << std::endl;
+  std::cout << "merge_sort with 4 threads: " << duration_with_4_threads.count() << " microseconds" << std::endl;
+  std::cout << "merge_sort with 8 threads: " << duration_with_8_threads.count() << " microseconds" << std::endl;
 
   return 0;
 }
